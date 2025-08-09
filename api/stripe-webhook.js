@@ -121,6 +121,69 @@ export default async function handler(req, res) {
       console.log('✅ Subscription status updated');
     }
 
+    // Handle invoice payment (for subscriptions)
+    if (event.type === 'invoice.payment_succeeded') {
+      const invoice = event.data.object;
+      console.log('💰 Invoice payment succeeded:', invoice.id);
+      
+      if (invoice.billing_reason === 'subscription_create') {
+        console.log('🆕 New subscription payment detected');
+        
+        // Get customer email from invoice
+        const customerId = invoice.customer;
+        const customerEmail = invoice.customer_email;
+        
+        console.log('📧 Customer ID:', customerId);
+        console.log('📧 Customer email:', customerEmail);
+        
+        if (!customerEmail) {
+          console.error('❌ No customer email found in invoice');
+          return res.status(400).json({ error: 'No customer email found' });
+        }
+
+        // Find user by email in Supabase auth
+        const { data: { users }, error: listError } = await supabase.auth.admin.listUsers();
+        
+        if (listError) {
+          console.error('❌ Error listing users:', listError);
+          return res.status(500).json({ error: 'Failed to find user' });
+        }
+
+        const user = users.find(u => u.email === customerEmail);
+        
+        if (!user) {
+          console.error('❌ User not found for email:', customerEmail);
+          return res.status(400).json({ error: 'User not found' });
+        }
+
+        console.log('👤 Found user for invoice payment:', user.id);
+
+        // Activate the subscription
+        const { data, error } = await supabase
+          .from('user_subscriptions')
+          .upsert({
+            user_id: user.id,
+            subscription_status: 'active',
+            payment_method_attached: true,
+            stripe_customer_id: customerId,
+            stripe_subscription_id: invoice.subscription,
+            current_period_start: new Date(invoice.period_start * 1000).toISOString(),
+            current_period_end: new Date(invoice.period_end * 1000).toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+
+        if (error) {
+          console.error('❌ Database error for invoice:', error);
+          return res.status(500).json({ error: 'Failed to activate subscription' });
+        }
+
+        console.log('✅ Subscription activated for invoice payment:', user.id);
+        return res.status(200).json({ success: true, user_id: user.id, event_type: 'invoice.payment_succeeded' });
+      }
+    }
+
     res.status(200).json({ received: true });
 
   } catch (error) {
