@@ -86,12 +86,19 @@ export default async function handler(req, res) {
           current_period_start: new Date().toISOString(),
           current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
           updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'user_id'
         })
         .select()
         .single();
 
       if (error) {
         console.error('❌ Database error:', error);
+        // If it's still a duplicate key error after upsert, log more details
+        if (error.code === '23505') {
+          console.error('❌ Duplicate key error persisted despite upsert. This should not happen.');
+          console.error('❌ Error details:', JSON.stringify(error, null, 2));
+        }
         return res.status(500).json({ error: 'Failed to activate subscription' });
       }
 
@@ -170,12 +177,19 @@ export default async function handler(req, res) {
             current_period_start: new Date(invoice.period_start * 1000).toISOString(),
             current_period_end: new Date(invoice.period_end * 1000).toISOString(),
             updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'user_id'
           })
           .select()
           .single();
 
         if (error) {
           console.error('❌ Database error for invoice:', error);
+          // If it's still a duplicate key error after upsert, log more details
+          if (error.code === '23505') {
+            console.error('❌ Duplicate key error persisted despite upsert. This should not happen.');
+            console.error('❌ Error details:', JSON.stringify(error, null, 2));
+          }
           return res.status(500).json({ error: 'Failed to activate subscription' });
         }
 
