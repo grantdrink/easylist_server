@@ -7,6 +7,9 @@ import { dirname } from 'path';
 import stripeWebhookHandler from './api/stripe-webhook.js';
 import activateSubscriptionHandler from './api/activate-subscription.js';
 import webhookTestHandler from './api/webhook-test.js';
+import createCustomerPortalSessionHandler from './api/create-customer-portal-session.js';
+import generatePaymentTokenHandler from './api/generate-payment-token.js';
+import processPaymentSuccessHandler from './api/process-payment-success.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -58,6 +61,9 @@ app.get('/api/health', (req, res) => {
       'GET /api/health',
       'POST /api/stripe-webhook', 
       'POST /api/activate-subscription',
+      'POST /api/create-customer-portal-session',
+      'POST /api/generate-payment-token',
+      'POST /api/process-payment-success',
       'GET /api/webhook-test'
     ],
     env_check: {
@@ -72,6 +78,9 @@ app.get('/api/health', (req, res) => {
 // API Routes
 app.post('/api/stripe-webhook', stripeWebhookHandler);
 app.post('/api/activate-subscription', activateSubscriptionHandler);
+app.post('/api/create-customer-portal-session', createCustomerPortalSessionHandler);
+app.post('/api/generate-payment-token', generatePaymentTokenHandler);
+app.post('/api/process-payment-success', processPaymentSuccessHandler);
 app.all('/api/webhook-test', webhookTestHandler);
 
 // Root endpoint
@@ -94,6 +103,9 @@ app.use('*', (req, res) => {
       'GET /api/health',
       'POST /api/stripe-webhook', 
       'POST /api/activate-subscription',
+      'POST /api/create-customer-portal-session',
+      'POST /api/generate-payment-token',
+      'POST /api/process-payment-success',
       'GET /api/webhook-test'
     ]
   });

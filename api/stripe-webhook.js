@@ -74,23 +74,24 @@ export default async function handler(req, res) {
 
       console.log('👤 Found user:', user.id);
 
-      // Activate the subscription
-      const { data, error } = await supabase
-        .from('user_subscriptions')
-        .upsert({
-          user_id: user.id,
-          subscription_status: 'active',
-          payment_method_attached: true,
-          stripe_customer_id: session.customer,
-          stripe_subscription_id: session.subscription,
-          current_period_start: new Date().toISOString(),
-          current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: 'user_id'
-        })
-        .select()
-        .single();
+              // Activate the subscription
+        const { data, error } = await supabase
+          .from('user_subscriptions')
+          .upsert({
+            user_id: user.id,
+            subscription_status: 'active',
+            payment_method_attached: true,
+            stripe_customer_id: session.customer,
+            stripe_subscription_id: session.subscription,
+            stripe_email: customerEmail,
+            current_period_start: new Date().toISOString(),
+            current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'user_id'
+          })
+          .select()
+          .single();
 
       if (error) {
         console.error('❌ Database error:', error);
@@ -174,6 +175,7 @@ export default async function handler(req, res) {
             payment_method_attached: true,
             stripe_customer_id: customerId,
             stripe_subscription_id: invoice.subscription,
+            stripe_email: customerEmail,
             current_period_start: new Date(invoice.period_start * 1000).toISOString(),
             current_period_end: new Date(invoice.period_end * 1000).toISOString(),
             updated_at: new Date().toISOString(),
