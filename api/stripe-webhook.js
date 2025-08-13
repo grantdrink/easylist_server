@@ -301,6 +301,60 @@ export default async function handler(req, res) {
       return res.status(200).json({ message: 'Payment received, subscription linking pending' });
     }
 
+    // Handle new subscription creation - CRITICAL for linking session_id to subscription
+    if (event.type === 'customer.subscription.created') {
+      const subscription = event.data.object;
+      console.log('🆕 New subscription created:', subscription.id);
+      console.log('🔍 Customer ID:', subscription.customer);
+      
+      // Check if this subscription came from a checkout session with client_reference_id
+      try {
+        const stripe = (await import('stripe')).default(process.env.VITE_STRIPE_SECRET_KEY);
+        
+        // Find recent checkout sessions for this customer
+        const sessions = await stripe.checkout.sessions.list({
+          customer: subscription.customer,
+          limit: 10
+        });
+        
+        console.log(`🔍 Found ${sessions.data.length} checkout sessions for customer`);
+        
+        // Look for a session with client_reference_id (our session_id)
+        const sessionWithReference = sessions.data.find(session => session.client_reference_id);
+        
+        if (sessionWithReference && sessionWithReference.client_reference_id) {
+          const sessionId = sessionWithReference.client_reference_id;
+          console.log('🎯 FOUND CLIENT REFERENCE ID IN CHECKOUT SESSION:', sessionId);
+          
+          // Update the subscription metadata with the session_id
+          await stripe.subscriptions.update(subscription.id, {
+            metadata: {
+              session_id: sessionId
+            }
+          });
+          
+          console.log('✅ Updated subscription metadata with session_id:', sessionId);
+          
+          // Also check if we have a pending payment for this session
+          const { data: pendingPayment } = await supabase
+            .from('pending_payments')
+            .select('*')
+            .eq('session_id', sessionId)
+            .eq('status', 'pending')
+            .single();
+            
+          if (pendingPayment) {
+            console.log('🎉 FOUND MATCHING PENDING PAYMENT!');
+            console.log('👤 User:', pendingPayment.user_id, '(' + pendingPayment.user_email + ')');
+          }
+        } else {
+          console.log('⚠️ No client_reference_id found in recent checkout sessions');
+        }
+      } catch (error) {
+        console.error('❌ Error linking session_id to subscription:', error);
+      }
+    }
+
     // Handle subscription status updates
     if (event.type === 'customer.subscription.updated') {
       const subscription = event.data.object;
@@ -343,7 +397,95 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'No customer email found' });
         }
 
-        // UPDATED APPROACH: Try to find existing subscription by Stripe customer ID first
+        // FOOLPROOF APPROACH: Check subscription metadata for session_id
+        const subscriptionId = invoice.subscription;
+        console.log('🔍 Checking subscription metadata for session_id:', subscriptionId);
+        
+        if (subscriptionId) {
+          try {
+            const stripe = (await import('stripe')).default(process.env.VITE_STRIPE_SECRET_KEY);
+            const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+            console.log('🔍 Subscription metadata:', JSON.stringify(subscription.metadata, null, 2));
+            
+            const sessionId = subscription.metadata?.session_id;
+            if (sessionId) {
+              console.log('🎯 FOUND SESSION ID IN SUBSCRIPTION METADATA!');
+              console.log('🔍 Looking for pending payment:', sessionId);
+              
+              // Find the pending payment record
+              const { data: pendingPayment, error: pendingError } = await supabase
+                .from('pending_payments')
+                .select('*')
+                .eq('session_id', sessionId)
+                .eq('status', 'pending')
+                .single();
+                
+              if (pendingError || !pendingPayment) {
+                console.error('❌ No pending payment found for session:', sessionId, pendingError);
+              } else {
+                console.log('🎉 FOUND PENDING PAYMENT FOR INVOICE!');
+                console.log('👤 User ID:', pendingPayment.user_id);
+                console.log('📧 User Email:', pendingPayment.user_email);
+                console.log('💳 Stripe Email:', customerEmail);
+                
+                // Create/update subscription record
+                const subscriptionData = {
+                  user_id: pendingPayment.user_id,
+                  user_email: pendingPayment.user_email,
+                  stripe_customer_id: customerId,
+                  stripe_subscription_id: subscriptionId,
+                  stripe_email: customerEmail,
+                  subscription_status: 'active',
+                  payment_method_attached: true,
+                  current_period_start: new Date().toISOString(),
+                  current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                  updated_at: new Date().toISOString(),
+                };
+
+                console.log('🔍 Creating subscription from invoice:', JSON.stringify(subscriptionData, null, 2));
+
+                const { data, error } = await supabase
+                  .from('user_subscriptions')
+                  .upsert(subscriptionData, {
+                    onConflict: 'user_id'
+                  })
+                  .select()
+                  .single();
+
+                if (error) {
+                  console.error('❌ Failed to create subscription from invoice:', error);
+                } else {
+                  // Mark pending payment as completed
+                  await supabase
+                    .from('pending_payments')
+                    .update({ 
+                      status: 'completed',
+                      stripe_customer_id: customerId,
+                      stripe_email: customerEmail,
+                      processed_at: new Date().toISOString()
+                    })
+                    .eq('session_id', sessionId);
+
+                  console.log('🎉 FOOLPROOF INVOICE LINKING SUCCESSFUL!');
+                  console.log('✅ User:', pendingPayment.user_id, '(' + pendingPayment.user_email + ')');
+                  console.log('✅ Stripe Email:', customerEmail);
+                  
+                  return res.status(200).json({ 
+                    success: true, 
+                    user_id: pendingPayment.user_id,
+                    message: 'Subscription automatically activated via invoice foolproof linking',
+                    platform_email: pendingPayment.user_email,
+                    stripe_email: customerEmail
+                  });
+                }
+              }
+            }
+          } catch (stripeError) {
+            console.error('❌ Error fetching subscription metadata:', stripeError);
+          }
+        }
+
+        // FALLBACK: Try to find existing subscription by Stripe customer ID first
         let subscriptionRecord = null;
         
         if (customerId) {
