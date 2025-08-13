@@ -22,7 +22,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  console.log('💳 API called - process-payment-success');
+  console.log('💳 ================================');
+  console.log('💳 PROCESS-PAYMENT-SUCCESS API CALLED');
+  console.log('💳 Timestamp:', new Date().toISOString());
+  console.log('💳 Request body:', JSON.stringify(req.body, null, 2));
+  console.log('💳 ================================');
 
   try {
     const { token, stripe_email } = req.body;
@@ -41,11 +45,14 @@ export default async function handler(req, res) {
     console.log('📧 Stripe email:', stripe_email);
 
     // Find the payment token and get the user_id
+    console.log('🔍 Searching for payment token:', token);
     const { data: tokenData, error: tokenError } = await supabase
       .from('payment_tokens')
       .select('user_id, used, expires_at')
       .eq('token', token)
       .single();
+
+    console.log('🔍 Token search result:', { tokenData, tokenError });
 
     if (tokenError || !tokenData) {
       console.error('❌ Invalid or expired token:', tokenError);
@@ -77,24 +84,50 @@ export default async function handler(req, res) {
     console.log('📧 User platform email:', userPlatformEmail);
 
     // Search for Stripe customers with this email
+    console.log('🔍 Searching Stripe for customer with email:', stripe_email);
     const customers = await stripe.customers.list({
       email: stripe_email,
       limit: 1,
     });
 
+    console.log('🔍 Stripe customer search result:', {
+      count: customers.data.length,
+      customers: customers.data.map(c => ({ id: c.id, email: c.email, created: c.created }))
+    });
+
     if (customers.data.length === 0) {
       console.error('❌ No Stripe customer found with email:', stripe_email);
+      console.log('🔍 All available customers in Stripe:');
+      // Get a few recent customers for debugging
+      const recentCustomers = await stripe.customers.list({ limit: 5 });
+      console.log('🔍 Recent customers:', recentCustomers.data.map(c => ({ id: c.id, email: c.email })));
       return res.status(404).json({ error: 'No Stripe customer found with this email' });
     }
 
     const customer = customers.data[0];
     console.log('🎯 Found Stripe customer:', customer.id);
+    console.log('🎯 Customer details:', {
+      id: customer.id,
+      email: customer.email,
+      created: new Date(customer.created * 1000).toISOString()
+    });
     
     // Get the customer's subscriptions
+    console.log('🔍 Searching for subscriptions for customer:', customer.id);
     const subscriptions = await stripe.subscriptions.list({
       customer: customer.id,
       status: 'all',
-      limit: 1,
+      limit: 10, // Get more to see all subscriptions
+    });
+
+    console.log('🔍 Subscription search result:', {
+      count: subscriptions.data.length,
+      subscriptions: subscriptions.data.map(s => ({
+        id: s.id,
+        status: s.status,
+        current_period_start: new Date(s.current_period_start * 1000).toISOString(),
+        current_period_end: new Date(s.current_period_end * 1000).toISOString()
+      }))
     });
 
     let subscriptionStatus = 'payment_required';
@@ -103,10 +136,17 @@ export default async function handler(req, res) {
     let currentPeriodEnd = null;
 
     if (subscriptions.data.length > 0) {
-      const subscription = subscriptions.data[0];
+      const subscription = subscriptions.data[0]; // Get most recent
       stripeSubscriptionId = subscription.id;
       currentPeriodStart = new Date(subscription.current_period_start * 1000).toISOString();
       currentPeriodEnd = new Date(subscription.current_period_end * 1000).toISOString();
+      
+      console.log('🔍 Processing subscription:', {
+        id: subscription.id,
+        stripe_status: subscription.status,
+        current_period_start: currentPeriodStart,
+        current_period_end: currentPeriodEnd
+      });
       
       // Map Stripe status to our status
       if (subscription.status === 'active' || subscription.status === 'trialing') {
@@ -118,27 +158,36 @@ export default async function handler(req, res) {
       }
     }
 
-    console.log('📊 Subscription status:', subscriptionStatus);
+    console.log('📊 Final subscription status mapping:', {
+      stripe_status: subscriptions.data[0]?.status,
+      our_status: subscriptionStatus
+    });
 
     // Update the user's subscription record
+    console.log('🔍 Updating user_subscriptions table with:');
+    const updateData = {
+      user_id: userId,
+      user_email: userPlatformEmail,
+      stripe_customer_id: customer.id,
+      stripe_subscription_id: stripeSubscriptionId,
+      stripe_email: stripe_email,
+      subscription_status: subscriptionStatus,
+      payment_method_attached: true,
+      current_period_start: currentPeriodStart,
+      current_period_end: currentPeriodEnd,
+      updated_at: new Date().toISOString(),
+    };
+    console.log('🔍 Update data:', JSON.stringify(updateData, null, 2));
+
     const { data: subscriptionData, error: subscriptionError } = await supabase
       .from('user_subscriptions')
-      .upsert({
-        user_id: userId,
-        user_email: userPlatformEmail, // Add the platform email
-        stripe_customer_id: customer.id,
-        stripe_subscription_id: stripeSubscriptionId,
-        stripe_email: stripe_email,
-        subscription_status: subscriptionStatus,
-        payment_method_attached: true,
-        current_period_start: currentPeriodStart,
-        current_period_end: currentPeriodEnd,
-        updated_at: new Date().toISOString(),
-      }, {
+      .upsert(updateData, {
         onConflict: 'user_id'
       })
       .select()
       .single();
+
+    console.log('🔍 Database upsert result:', { subscriptionData, subscriptionError });
 
     if (subscriptionError) {
       console.error('❌ Error updating subscription:', subscriptionError);

@@ -8,7 +8,9 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
+  console.log('🌟 ================================');
   console.log('🌟 STRIPE WEBHOOK CALLED!');
+  console.log('🌟 Timestamp:', new Date().toISOString());
   console.log('🌟 Method:', req.method);
   console.log('🌟 Headers:', JSON.stringify(req.headers, null, 2));
   console.log('🌟 Environment check:');
@@ -16,6 +18,7 @@ export default async function handler(req, res) {
   console.log('  - VITE_STRIPE_WEBHOOK_SECRET:', !!process.env.VITE_STRIPE_WEBHOOK_SECRET);
   console.log('  - VITE_SUPABASE_URL:', !!process.env.VITE_SUPABASE_URL);
   console.log('  - VITE_SUPABASE_SERVICE_ROLE_KEY:', !!process.env.VITE_SUPABASE_SERVICE_ROLE_KEY);
+  console.log('🌟 ================================');
 
   if (req.method !== 'POST') {
     console.log('❌ Wrong method:', req.method);
@@ -90,14 +93,27 @@ export default async function handler(req, res) {
       
       // NO FALLBACK TO EMAIL MATCHING - Let token-based flow handle all new subscriptions
       if (!subscriptionRecord) {
-        console.log('🔍 No existing subscription found.');
+        console.log('🔍 ================================');
+        console.log('🔍 NO EXISTING SUBSCRIPTION FOUND');
+        console.log('🔍 Customer ID searched:', session.customer);
+        console.log('🔍 Stripe email searched:', customerEmail);
+        console.log('🔍 Session details:', JSON.stringify({
+          session_id: session.id,
+          customer: session.customer,
+          subscription: session.subscription,
+          amount_total: session.amount_total,
+          currency: session.currency,
+          customer_email: customerEmail
+        }, null, 2));
         console.log('ℹ️ This payment will be linked when the user completes the token-based flow.');
         console.log('ℹ️ Webhook will NOT attempt email matching to prevent cross-user subscription activation.');
+        console.log('🔍 ================================');
         return res.status(200).json({ 
           message: 'Payment received. Subscription linking will be handled by secure token-based flow.',
           stripe_customer_id: session.customer,
           stripe_email: customerEmail,
-          note: 'No email matching attempted - prevents accidental cross-user activation'
+          note: 'No email matching attempted - prevents accidental cross-user activation',
+          session_id: session.id
         });
       }
       
