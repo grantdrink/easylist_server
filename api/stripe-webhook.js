@@ -59,9 +59,90 @@ export default async function handler(req, res) {
       }
 
       console.log('📧 Customer email:', customerEmail);
+      console.log('🔍 Session metadata:', JSON.stringify(session.metadata, null, 2));
 
-      // UPDATED APPROACH: Try to find existing subscription by Stripe customer ID first
-      // This handles the case where the user already linked their subscription via the token system
+      // NEW AUTOMATIC APPROACH: Use payment token from session metadata
+      const paymentToken = session.metadata?.payment_token;
+      const userId = session.metadata?.user_id;
+      const platformEmail = session.metadata?.platform_email;
+
+      if (paymentToken && userId) {
+        console.log('🎯 AUTOMATIC TOKEN-BASED LINKING');
+        console.log('🎫 Payment token from metadata:', paymentToken);
+        console.log('👤 User ID from metadata:', userId);
+        console.log('📧 Platform email from metadata:', platformEmail);
+
+        // Verify the token exists and is valid
+        const { data: tokenData, error: tokenError } = await supabase
+          .from('payment_tokens')
+          .select('user_id, used, expires_at')
+          .eq('token', paymentToken)
+          .single();
+
+        if (tokenError || !tokenData) {
+          console.error('❌ Invalid token in session metadata:', tokenError);
+        } else if (tokenData.used) {
+          console.log('⚠️ Token already used, but proceeding with webhook');
+        } else if (new Date(tokenData.expires_at) < new Date()) {
+          console.log('⚠️ Token expired, but proceeding with webhook');
+        } else {
+          console.log('✅ Valid token found, proceeding with automatic linking');
+        }
+
+        // Create/update subscription record automatically
+        const subscriptionData = {
+          user_id: userId,
+          user_email: platformEmail,
+          stripe_customer_id: session.customer,
+          stripe_subscription_id: session.subscription,
+          stripe_email: customerEmail,
+          subscription_status: 'active',
+          payment_method_attached: true,
+          current_period_start: new Date().toISOString(),
+          current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        console.log('🔍 Creating subscription record:', JSON.stringify(subscriptionData, null, 2));
+
+        const { data, error } = await supabase
+          .from('user_subscriptions')
+          .upsert(subscriptionData, {
+            onConflict: 'user_id'
+          })
+          .select()
+          .single();
+
+        if (error) {
+          console.error('❌ Database error:', error);
+          return res.status(500).json({ error: 'Failed to activate subscription' });
+        }
+
+        // Mark token as used
+        if (tokenData && !tokenData.used) {
+          await supabase
+            .from('payment_tokens')
+            .update({ used: true })
+            .eq('token', paymentToken);
+          console.log('✅ Payment token marked as used');
+        }
+
+        console.log('🎉 AUTOMATIC SUBSCRIPTION ACTIVATION SUCCESSFUL!');
+        console.log('✅ User:', userId, '(' + platformEmail + ')');
+        console.log('✅ Stripe email:', customerEmail);
+        console.log('✅ Customer ID:', session.customer);
+        console.log('✅ Subscription ID:', session.subscription);
+        
+        return res.status(200).json({ 
+          success: true, 
+          user_id: userId,
+          message: 'Subscription automatically activated via token-based linking',
+          platform_email: platformEmail,
+          stripe_email: customerEmail
+        });
+      }
+
+      // FALLBACK: Try to find existing subscription by Stripe customer ID
       let subscriptionRecord = null;
       
       if (session.customer) {
@@ -91,28 +172,20 @@ export default async function handler(req, res) {
         }
       }
       
-      // NO FALLBACK TO EMAIL MATCHING - Let token-based flow handle all new subscriptions
+      // NO TOKEN AND NO EXISTING SUBSCRIPTION - Payment cannot be linked automatically
       if (!subscriptionRecord) {
         console.log('🔍 ================================');
-        console.log('🔍 NO EXISTING SUBSCRIPTION FOUND');
+        console.log('🔍 NO TOKEN AND NO EXISTING SUBSCRIPTION FOUND');
+        console.log('🔍 This indicates an old payment or payment not initiated through our system');
         console.log('🔍 Customer ID searched:', session.customer);
         console.log('🔍 Stripe email searched:', customerEmail);
-        console.log('🔍 Session details:', JSON.stringify({
-          session_id: session.id,
-          customer: session.customer,
-          subscription: session.subscription,
-          amount_total: session.amount_total,
-          currency: session.currency,
-          customer_email: customerEmail
-        }, null, 2));
-        console.log('ℹ️ This payment will be linked when the user completes the token-based flow.');
-        console.log('ℹ️ Webhook will NOT attempt email matching to prevent cross-user subscription activation.');
+        console.log('🔍 Session metadata:', JSON.stringify(session.metadata, null, 2));
+        console.log('ℹ️ Webhook cannot automatically link this payment');
         console.log('🔍 ================================');
         return res.status(200).json({ 
-          message: 'Payment received. Subscription linking will be handled by secure token-based flow.',
+          message: 'Payment received but cannot be automatically linked. No token in metadata.',
           stripe_customer_id: session.customer,
           stripe_email: customerEmail,
-          note: 'No email matching attempted - prevents accidental cross-user activation',
           session_id: session.id
         });
       }
