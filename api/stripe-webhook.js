@@ -296,16 +296,168 @@ export default async function handler(req, res) {
           }
         }
         
-        // NO FALLBACK TO EMAIL MATCHING - Let token-based flow handle all new subscriptions
-        if (!subscriptionRecord) {
-          console.log('🔍 No existing subscription found for invoice payment.');
-          console.log('ℹ️ This invoice payment will be linked when the user completes the token-based flow.');
-          console.log('ℹ️ Webhook will NOT attempt email matching to prevent cross-user subscription activation.');
+        // CHECK FOR TOKEN IN SUBSCRIPTION METADATA (for checkout sessions)
+        let paymentToken = null;
+        let userId = null;
+        let platformEmail = null;
+
+        if (invoice.subscription) {
+          console.log('🔍 Checking subscription metadata for token...');
+          try {
+            const subscription = await stripe.subscriptions.retrieve(invoice.subscription);
+            console.log('🔍 Subscription metadata:', JSON.stringify(subscription.metadata, null, 2));
+            
+            paymentToken = subscription.metadata?.payment_token;
+            userId = subscription.metadata?.user_id;
+            platformEmail = subscription.metadata?.platform_email;
+            
+            if (paymentToken && userId) {
+              console.log('🎯 FOUND TOKEN IN SUBSCRIPTION METADATA!');
+              console.log('🎫 Payment token:', paymentToken);
+              console.log('👤 User ID:', userId);
+              console.log('📧 Platform email:', platformEmail);
+            }
+          } catch (error) {
+            console.error('❌ Error retrieving subscription metadata:', error);
+          }
+        }
+
+        if (paymentToken && userId) {
+          console.log('🎯 AUTOMATIC TOKEN-BASED LINKING (FROM INVOICE)');
+
+          // Verify the token exists and is valid
+          const { data: tokenData, error: tokenError } = await supabase
+            .from('payment_tokens')
+            .select('user_id, used, expires_at')
+            .eq('token', paymentToken)
+            .single();
+
+          if (tokenError || !tokenData) {
+            console.error('❌ Invalid token in subscription metadata:', tokenError);
+          } else {
+            console.log('✅ Valid token found, proceeding with automatic linking');
+          }
+
+          // Create/update subscription record automatically
+          const subscriptionData = {
+            user_id: userId,
+            user_email: platformEmail,
+            stripe_customer_id: customerId,
+            stripe_subscription_id: invoice.subscription,
+            stripe_email: customerEmail,
+            subscription_status: 'active',
+            payment_method_attached: true,
+            current_period_start: new Date(invoice.period_start * 1000).toISOString(),
+            current_period_end: new Date(invoice.period_end * 1000).toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+
+          console.log('🔍 Creating subscription record from invoice:', JSON.stringify(subscriptionData, null, 2));
+
+          const { data, error } = await supabase
+            .from('user_subscriptions')
+            .upsert(subscriptionData, {
+              onConflict: 'user_id'
+            })
+            .select()
+            .single();
+
+          if (error) {
+            console.error('❌ Database error:', error);
+            return res.status(500).json({ error: 'Failed to activate subscription' });
+          }
+
+          // Mark token as used
+          if (tokenData && !tokenData.used) {
+            await supabase
+              .from('payment_tokens')
+              .update({ used: true })
+              .eq('token', paymentToken);
+            console.log('✅ Payment token marked as used');
+          }
+
+          console.log('🎉 AUTOMATIC SUBSCRIPTION ACTIVATION SUCCESSFUL (FROM INVOICE)!');
+          console.log('✅ User:', userId, '(' + platformEmail + ')');
+          console.log('✅ Stripe email:', customerEmail);
+          console.log('✅ Customer ID:', customerId);
+          console.log('✅ Subscription ID:', invoice.subscription);
+          
           return res.status(200).json({ 
-            message: 'Invoice payment received. Subscription linking will be handled by secure token-based flow.',
+            success: true, 
+            user_id: userId,
+            message: 'Subscription automatically activated via token-based linking (from invoice)',
+            platform_email: platformEmail,
+            stripe_email: customerEmail
+          });
+        }
+
+        // NO TOKEN FOUND - Check if same email can be linked
+        if (!subscriptionRecord) {
+          console.log('🔍 No token in subscription metadata, checking for same-email linking...');
+          
+          // For same-email scenarios, we can safely link automatically
+          if (customerEmail) {
+            console.log('🔍 Attempting same-email linking for:', customerEmail);
+            
+            // Find user by email in Supabase auth
+            const { data: { users }, error: listError } = await supabase.auth.admin.listUsers();
+            
+            if (listError) {
+              console.error('❌ Error listing users:', listError);
+              return res.status(500).json({ error: 'Failed to find user' });
+            }
+
+            const user = users.find(u => u.email === customerEmail);
+            
+            if (user) {
+              console.log('✅ Found user with same email - safe to link:', user.id);
+              
+              // Create subscription record for same-email user
+              const subscriptionData = {
+                user_id: user.id,
+                user_email: customerEmail,
+                stripe_customer_id: customerId,
+                stripe_subscription_id: invoice.subscription,
+                stripe_email: customerEmail,
+                subscription_status: 'active',
+                payment_method_attached: true,
+                current_period_start: new Date(invoice.period_start * 1000).toISOString(),
+                current_period_end: new Date(invoice.period_end * 1000).toISOString(),
+                updated_at: new Date().toISOString(),
+              };
+
+              const { data, error } = await supabase
+                .from('user_subscriptions')
+                .upsert(subscriptionData, {
+                  onConflict: 'user_id'
+                })
+                .select()
+                .single();
+
+              if (error) {
+                console.error('❌ Database error for same-email linking:', error);
+                return res.status(500).json({ error: 'Failed to activate subscription' });
+              }
+
+              console.log('🎉 SAME-EMAIL SUBSCRIPTION ACTIVATION SUCCESSFUL!');
+              console.log('✅ User:', user.id, '(' + customerEmail + ')');
+              
+              return res.status(200).json({ 
+                success: true, 
+                user_id: user.id,
+                message: 'Subscription automatically activated via same-email linking'
+              });
+            }
+          }
+          
+          console.log('🔍 No existing subscription found for invoice payment.');
+          console.log('ℹ️ No token in metadata and no same-email user found.');
+          console.log('ℹ️ This indicates different emails were used but checkout session was not used.');
+          return res.status(200).json({ 
+            message: 'Invoice payment received but cannot be automatically linked. Use checkout session for different emails.',
             stripe_customer_id: customerId,
             stripe_email: customerEmail,
-            note: 'No email matching attempted - prevents accidental cross-user activation'
+            note: 'No token in subscription metadata - different emails require checkout session'
           });
         }
         

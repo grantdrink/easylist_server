@@ -29,8 +29,7 @@ app.use(cors({
   origin: [
     'http://localhost:5173',  // Vite dev server
     'http://localhost:3000',  // Alternative dev port
-    'https://shotgunly.com',  // Your production domain
-    'https://easylistinventory.com',  // Your actual production domain
+    'https://easylistinventory.com',  // Your production domain
     /^https:\/\/.*\.railway\.app$/, // Railway preview URLs
   ],
   credentials: true,
@@ -101,7 +100,7 @@ app.get('/', (req, res) => {
     message: 'EasyList API Server',
     status: 'running',
     docs: 'Use /api/health for service status',
-    frontend: 'https://shotgunly.com'
+    frontend: 'https://easylistinventory.com'
   });
 });
 
