@@ -30,6 +30,7 @@ app.use(cors({
     'http://localhost:5173',  // Vite dev server
     'http://localhost:3000',  // Alternative dev port
     'https://shotgunly.com',  // Your production domain
+    'https://easylistinventory.com',  // Your actual production domain
     /^https:\/\/.*\.railway\.app$/, // Railway preview URLs
   ],
   credentials: true,
@@ -43,9 +44,20 @@ app.use('/api/stripe-webhook', express.raw({ type: 'application/json' }));
 // Regular JSON parsing for other endpoints
 app.use(express.json());
 
+// Handle preflight OPTIONS requests
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin);
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, stripe-signature');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(200);
+});
+
 // Request logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  console.log(`Origin: ${req.headers.origin}`);
+  console.log(`User-Agent: ${req.headers['user-agent']?.substring(0, 50)}...`);
   next();
 });
 
