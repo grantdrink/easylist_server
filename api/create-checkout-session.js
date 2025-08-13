@@ -66,8 +66,22 @@ export default async function handler(req, res) {
     const userPlatformEmail = authUser.user.email;
     console.log('📧 User platform email:', userPlatformEmail);
 
-    // Create Stripe Checkout Session
+    // Create Stripe Customer with user metadata - KEY TO AUTOMATIC LINKING
+    const customer = await stripe.customers.create({
+      email: userPlatformEmail,
+      metadata: {
+        easylist_user_id: user_id,
+        platform_email: userPlatformEmail,
+        payment_token: token
+      }
+    });
+
+    console.log('✅ Created Stripe Customer with metadata:', customer.id);
+    console.log('🔍 Customer metadata:', JSON.stringify(customer.metadata, null, 2));
+
+    // Create Stripe Checkout Session linked to customer
     const session = await stripe.checkout.sessions.create({
+      customer: customer.id, // CRITICAL: Link to customer with metadata
       payment_method_types: ['card'],
       line_items: [
         {
@@ -91,16 +105,11 @@ export default async function handler(req, res) {
       subscription_data: {
         trial_period_days: 30,
         metadata: {
-          payment_token: token,
-          user_id: user_id,
+          easylist_user_id: user_id,
           platform_email: userPlatformEmail,
-        },
-      },
-      metadata: {
-        payment_token: token,
-        user_id: user_id,
-        platform_email: userPlatformEmail,
-      },
+          payment_token: token
+        }
+      }
     });
 
     console.log('✅ Checkout session created:', session.id);

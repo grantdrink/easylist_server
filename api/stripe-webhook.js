@@ -62,79 +62,135 @@ export default async function handler(req, res) {
       console.log('🔍 Session metadata:', JSON.stringify(session.metadata, null, 2));
       console.log('🔍 Client reference ID:', session.client_reference_id);
 
-      // FOOLPROOF APPROACH: Check client_reference_id for pre-stored payment link
-      const clientReferenceId = session.client_reference_id;
+      // CUSTOMER METADATA APPROACH: Check Stripe Customer metadata for automatic linking
+      const customerId = session.customer;
+      console.log('🔍 Checking Customer metadata for automatic linking:', customerId);
       
-      if (clientReferenceId) {
-        console.log('🎯 FOUND CLIENT REFERENCE ID - CHECKING PENDING PAYMENTS');
-        console.log('🔍 Looking for session ID:', clientReferenceId);
-        
-        // Find the pending payment record
-        const { data: pendingPayment, error: pendingError } = await supabase
-          .from('pending_payments')
-          .select('*')
-          .eq('session_id', clientReferenceId)
-          .eq('status', 'pending')
-          .single();
+      if (customerId) {
+        try {
+          const stripe = (await import('stripe')).default(process.env.VITE_STRIPE_SECRET_KEY);
+          const customer = await stripe.customers.retrieve(customerId);
+          console.log('🔍 Customer metadata:', JSON.stringify(customer.metadata, null, 2));
           
-        if (pendingError || !pendingPayment) {
-          console.error('❌ No pending payment found for session:', clientReferenceId, pendingError);
-        } else {
-          console.log('🎉 FOUND PENDING PAYMENT!');
-          console.log('👤 User ID:', pendingPayment.user_id);
-          console.log('📧 User Email:', pendingPayment.user_email);
-          console.log('💳 Stripe Email:', customerEmail);
+          const easylistUserId = customer.metadata?.easylist_user_id;
+          const platformEmail = customer.metadata?.platform_email;
+          const paymentToken = customer.metadata?.payment_token;
           
-          // Create/update subscription record
-          const subscriptionData = {
-            user_id: pendingPayment.user_id,
-            user_email: pendingPayment.user_email,
-            stripe_customer_id: session.customer,
-            stripe_subscription_id: session.subscription,
-            stripe_email: customerEmail,
-            subscription_status: 'active',
-            payment_method_attached: true,
-            current_period_start: new Date().toISOString(),
-            current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-            updated_at: new Date().toISOString(),
-          };
-
-          console.log('🔍 Creating subscription:', JSON.stringify(subscriptionData, null, 2));
-
-          const { data, error } = await supabase
-            .from('user_subscriptions')
-            .upsert(subscriptionData, {
-              onConflict: 'user_id'
-            })
-            .select()
-            .single();
-
-          if (error) {
-            console.error('❌ Failed to create subscription:', error);
-          } else {
-            // Mark pending payment as completed
-            await supabase
-              .from('pending_payments')
-              .update({ 
-                status: 'completed',
-                stripe_customer_id: session.customer,
-                stripe_email: customerEmail,
-                processed_at: new Date().toISOString()
-              })
-              .eq('session_id', clientReferenceId);
-
-            console.log('🎉 FOOLPROOF PAYMENT LINKING SUCCESSFUL!');
-            console.log('✅ User:', pendingPayment.user_id, '(' + pendingPayment.user_email + ')');
-            console.log('✅ Stripe Email:', customerEmail);
+          if (easylistUserId && platformEmail) {
+            console.log('🎯 FOUND USER INFO IN CUSTOMER METADATA!');
+            console.log('👤 EasyList User ID:', easylistUserId);
+            console.log('📧 Platform Email:', platformEmail);
+            console.log('💳 Stripe Email:', customerEmail);
+            console.log('🎫 Payment Token:', paymentToken);
             
-            return res.status(200).json({ 
-              success: true, 
-              user_id: pendingPayment.user_id,
-              message: 'Subscription automatically activated via foolproof linking',
-              platform_email: pendingPayment.user_email,
-              stripe_email: customerEmail
-            });
+            // Create/update subscription record
+            const subscriptionData = {
+              user_id: easylistUserId,
+              user_email: platformEmail,
+              stripe_customer_id: customerId,
+              stripe_subscription_id: session.subscription,
+              stripe_email: customerEmail,
+              subscription_status: 'active',
+              payment_method_attached: true,
+              current_period_start: new Date().toISOString(),
+              current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+              updated_at: new Date().toISOString(),
+            };
+
+            console.log('🔍 Creating subscription from checkout session:', JSON.stringify(subscriptionData, null, 2));
+
+            const { data, error } = await supabase
+              .from('user_subscriptions')
+              .upsert(subscriptionData, {
+                onConflict: 'user_id'
+              })
+              .select()
+              .single();
+
+            if (error) {
+              console.error('❌ Failed to create subscription from customer metadata:', error);
+            } else {
+              // Mark payment token as used if it exists
+              if (paymentToken) {
+                await supabase
+                  .from('payment_tokens')
+                  .update({ used: true })
+                  .eq('token', paymentToken);
+                console.log('✅ Payment token marked as used:', paymentToken);
+              }
+
+              console.log('🎉 AUTOMATIC CHECKOUT SESSION LINKING SUCCESSFUL!');
+              console.log('✅ User:', easylistUserId, '(' + platformEmail + ')');
+              console.log('✅ Stripe Email:', customerEmail);
+              
+              return res.status(200).json({ 
+                success: true, 
+                user_id: easylistUserId,
+                message: 'Subscription automatically activated via customer metadata checkout linking',
+                platform_email: platformEmail,
+                stripe_email: customerEmail
+              });
+            }
+          } else {
+            console.log('⚠️ No user info found in customer metadata for checkout session');
+            
+            // BACKUP: Try subscription metadata if customer metadata is missing
+            if (session.subscription) {
+              try {
+                const subscriptionObj = await stripe.subscriptions.retrieve(session.subscription);
+                console.log('🔍 Checking subscription metadata as backup:', JSON.stringify(subscriptionObj.metadata, null, 2));
+                
+                const subUserId = subscriptionObj.metadata?.easylist_user_id;
+                const subPlatformEmail = subscriptionObj.metadata?.platform_email;
+                const subPaymentToken = subscriptionObj.metadata?.payment_token;
+                
+                if (subUserId && subPlatformEmail) {
+                  console.log('🎯 FOUND USER INFO IN SUBSCRIPTION METADATA!');
+                  
+                  const subscriptionData = {
+                    user_id: subUserId,
+                    user_email: subPlatformEmail,
+                    stripe_customer_id: customerId,
+                    stripe_subscription_id: session.subscription,
+                    stripe_email: customerEmail,
+                    subscription_status: 'active',
+                    payment_method_attached: true,
+                    current_period_start: new Date().toISOString(),
+                    current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                    updated_at: new Date().toISOString(),
+                  };
+
+                  const { data, error } = await supabase
+                    .from('user_subscriptions')
+                    .upsert(subscriptionData, { onConflict: 'user_id' })
+                    .select()
+                    .single();
+
+                  if (!error) {
+                    if (subPaymentToken) {
+                      await supabase
+                        .from('payment_tokens')
+                        .update({ used: true })
+                        .eq('token', subPaymentToken);
+                    }
+
+                    console.log('🎉 SUBSCRIPTION METADATA LINKING SUCCESSFUL!');
+                    return res.status(200).json({ 
+                      success: true, 
+                      user_id: subUserId,
+                      message: 'Subscription activated via subscription metadata',
+                      platform_email: subPlatformEmail,
+                      stripe_email: customerEmail
+                    });
+                  }
+                }
+              } catch (subError) {
+                console.error('❌ Error checking subscription metadata:', subError);
+              }
+            }
           }
+        } catch (stripeError) {
+          console.error('❌ Error fetching customer metadata from checkout session:', stripeError);
         }
       }
 
@@ -301,57 +357,25 @@ export default async function handler(req, res) {
       return res.status(200).json({ message: 'Payment received, subscription linking pending' });
     }
 
-    // Handle new subscription creation - CRITICAL for linking session_id to subscription
+    // Handle new subscription creation - Log and verify customer metadata
     if (event.type === 'customer.subscription.created') {
       const subscription = event.data.object;
       console.log('🆕 New subscription created:', subscription.id);
       console.log('🔍 Customer ID:', subscription.customer);
       
-      // Check if this subscription came from a checkout session with client_reference_id
+      // Verify the customer has our metadata for debugging
       try {
         const stripe = (await import('stripe')).default(process.env.VITE_STRIPE_SECRET_KEY);
+        const customer = await stripe.customers.retrieve(subscription.customer);
+        console.log('🔍 Customer metadata verification:', JSON.stringify(customer.metadata, null, 2));
         
-        // Find recent checkout sessions for this customer
-        const sessions = await stripe.checkout.sessions.list({
-          customer: subscription.customer,
-          limit: 10
-        });
-        
-        console.log(`🔍 Found ${sessions.data.length} checkout sessions for customer`);
-        
-        // Look for a session with client_reference_id (our session_id)
-        const sessionWithReference = sessions.data.find(session => session.client_reference_id);
-        
-        if (sessionWithReference && sessionWithReference.client_reference_id) {
-          const sessionId = sessionWithReference.client_reference_id;
-          console.log('🎯 FOUND CLIENT REFERENCE ID IN CHECKOUT SESSION:', sessionId);
-          
-          // Update the subscription metadata with the session_id
-          await stripe.subscriptions.update(subscription.id, {
-            metadata: {
-              session_id: sessionId
-            }
-          });
-          
-          console.log('✅ Updated subscription metadata with session_id:', sessionId);
-          
-          // Also check if we have a pending payment for this session
-          const { data: pendingPayment } = await supabase
-            .from('pending_payments')
-            .select('*')
-            .eq('session_id', sessionId)
-            .eq('status', 'pending')
-            .single();
-            
-          if (pendingPayment) {
-            console.log('🎉 FOUND MATCHING PENDING PAYMENT!');
-            console.log('👤 User:', pendingPayment.user_id, '(' + pendingPayment.user_email + ')');
-          }
+        if (customer.metadata?.easylist_user_id) {
+          console.log('✅ Customer has EasyList user metadata - subscription will be auto-linked');
         } else {
-          console.log('⚠️ No client_reference_id found in recent checkout sessions');
+          console.log('⚠️ Customer missing EasyList metadata - may be external subscription');
         }
       } catch (error) {
-        console.error('❌ Error linking session_id to subscription:', error);
+        console.error('❌ Error checking customer metadata:', error);
       }
     }
 
@@ -397,91 +421,135 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'No customer email found' });
         }
 
-        // FOOLPROOF APPROACH: Check subscription metadata for session_id
-        const subscriptionId = invoice.subscription;
-        console.log('🔍 Checking subscription metadata for session_id:', subscriptionId);
+        // CUSTOMER METADATA APPROACH: Check Stripe Customer metadata for user linking
+        console.log('🔍 Checking Stripe Customer metadata for user linking:', customerId);
         
-        if (subscriptionId) {
+        if (customerId) {
           try {
             const stripe = (await import('stripe')).default(process.env.VITE_STRIPE_SECRET_KEY);
-            const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-            console.log('🔍 Subscription metadata:', JSON.stringify(subscription.metadata, null, 2));
+            const customer = await stripe.customers.retrieve(customerId);
+            console.log('🔍 Customer metadata:', JSON.stringify(customer.metadata, null, 2));
             
-            const sessionId = subscription.metadata?.session_id;
-            if (sessionId) {
-              console.log('🎯 FOUND SESSION ID IN SUBSCRIPTION METADATA!');
-              console.log('🔍 Looking for pending payment:', sessionId);
+            const easylistUserId = customer.metadata?.easylist_user_id;
+            const platformEmail = customer.metadata?.platform_email;
+            const paymentToken = customer.metadata?.payment_token;
+            
+            if (easylistUserId && platformEmail) {
+              console.log('🎯 FOUND USER INFO IN CUSTOMER METADATA!');
+              console.log('👤 EasyList User ID:', easylistUserId);
+              console.log('📧 Platform Email:', platformEmail);
+              console.log('💳 Stripe Email:', customerEmail);
+              console.log('🎫 Payment Token:', paymentToken);
               
-              // Find the pending payment record
-              const { data: pendingPayment, error: pendingError } = await supabase
-                .from('pending_payments')
-                .select('*')
-                .eq('session_id', sessionId)
-                .eq('status', 'pending')
+              // Create/update subscription record
+              const subscriptionData = {
+                user_id: easylistUserId,
+                user_email: platformEmail,
+                stripe_customer_id: customerId,
+                stripe_subscription_id: invoice.subscription,
+                stripe_email: customerEmail,
+                subscription_status: 'active',
+                payment_method_attached: true,
+                current_period_start: new Date().toISOString(),
+                current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                updated_at: new Date().toISOString(),
+              };
+
+              console.log('🔍 Creating subscription from customer metadata:', JSON.stringify(subscriptionData, null, 2));
+
+              const { data, error } = await supabase
+                .from('user_subscriptions')
+                .upsert(subscriptionData, {
+                  onConflict: 'user_id'
+                })
+                .select()
                 .single();
-                
-              if (pendingError || !pendingPayment) {
-                console.error('❌ No pending payment found for session:', sessionId, pendingError);
+
+              if (error) {
+                console.error('❌ Failed to create subscription from customer metadata:', error);
               } else {
-                console.log('🎉 FOUND PENDING PAYMENT FOR INVOICE!');
-                console.log('👤 User ID:', pendingPayment.user_id);
-                console.log('📧 User Email:', pendingPayment.user_email);
-                console.log('💳 Stripe Email:', customerEmail);
-                
-                // Create/update subscription record
-                const subscriptionData = {
-                  user_id: pendingPayment.user_id,
-                  user_email: pendingPayment.user_email,
-                  stripe_customer_id: customerId,
-                  stripe_subscription_id: subscriptionId,
-                  stripe_email: customerEmail,
-                  subscription_status: 'active',
-                  payment_method_attached: true,
-                  current_period_start: new Date().toISOString(),
-                  current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-                  updated_at: new Date().toISOString(),
-                };
-
-                console.log('🔍 Creating subscription from invoice:', JSON.stringify(subscriptionData, null, 2));
-
-                const { data, error } = await supabase
-                  .from('user_subscriptions')
-                  .upsert(subscriptionData, {
-                    onConflict: 'user_id'
-                  })
-                  .select()
-                  .single();
-
-                if (error) {
-                  console.error('❌ Failed to create subscription from invoice:', error);
-                } else {
-                  // Mark pending payment as completed
+                // Mark payment token as used if it exists
+                if (paymentToken) {
                   await supabase
-                    .from('pending_payments')
-                    .update({ 
-                      status: 'completed',
-                      stripe_customer_id: customerId,
-                      stripe_email: customerEmail,
-                      processed_at: new Date().toISOString()
-                    })
-                    .eq('session_id', sessionId);
+                    .from('payment_tokens')
+                    .update({ used: true })
+                    .eq('token', paymentToken);
+                  console.log('✅ Payment token marked as used:', paymentToken);
+                }
 
-                  console.log('🎉 FOOLPROOF INVOICE LINKING SUCCESSFUL!');
-                  console.log('✅ User:', pendingPayment.user_id, '(' + pendingPayment.user_email + ')');
-                  console.log('✅ Stripe Email:', customerEmail);
+                console.log('🎉 AUTOMATIC CUSTOMER METADATA LINKING SUCCESSFUL!');
+                console.log('✅ User:', easylistUserId, '(' + platformEmail + ')');
+                console.log('✅ Stripe Email:', customerEmail);
+                
+                return res.status(200).json({ 
+                  success: true, 
+                  user_id: easylistUserId,
+                  message: 'Subscription automatically activated via customer metadata linking',
+                  platform_email: platformEmail,
+                  stripe_email: customerEmail
+                });
+              }
+            } else {
+              console.log('⚠️ No user info found in customer metadata');
+              
+              // BACKUP: Try subscription metadata if customer metadata is missing
+              const subscriptionId = invoice.subscription;
+              if (subscriptionId) {
+                try {
+                  const subscriptionObj = await stripe.subscriptions.retrieve(subscriptionId);
+                  console.log('🔍 Checking subscription metadata as backup:', JSON.stringify(subscriptionObj.metadata, null, 2));
                   
-                  return res.status(200).json({ 
-                    success: true, 
-                    user_id: pendingPayment.user_id,
-                    message: 'Subscription automatically activated via invoice foolproof linking',
-                    platform_email: pendingPayment.user_email,
-                    stripe_email: customerEmail
-                  });
+                  const subUserId = subscriptionObj.metadata?.easylist_user_id;
+                  const subPlatformEmail = subscriptionObj.metadata?.platform_email;
+                  const subPaymentToken = subscriptionObj.metadata?.payment_token;
+                  
+                  if (subUserId && subPlatformEmail) {
+                    console.log('🎯 FOUND USER INFO IN SUBSCRIPTION METADATA FOR INVOICE!');
+                    
+                    const subscriptionData = {
+                      user_id: subUserId,
+                      user_email: subPlatformEmail,
+                      stripe_customer_id: customerId,
+                      stripe_subscription_id: subscriptionId,
+                      stripe_email: customerEmail,
+                      subscription_status: 'active',
+                      payment_method_attached: true,
+                      current_period_start: new Date().toISOString(),
+                      current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                      updated_at: new Date().toISOString(),
+                    };
+
+                    const { data, error } = await supabase
+                      .from('user_subscriptions')
+                      .upsert(subscriptionData, { onConflict: 'user_id' })
+                      .select()
+                      .single();
+
+                    if (!error) {
+                      if (subPaymentToken) {
+                        await supabase
+                          .from('payment_tokens')
+                          .update({ used: true })
+                          .eq('token', subPaymentToken);
+                      }
+
+                      console.log('🎉 INVOICE SUBSCRIPTION METADATA LINKING SUCCESSFUL!');
+                      return res.status(200).json({ 
+                        success: true, 
+                        user_id: subUserId,
+                        message: 'Subscription activated via invoice subscription metadata',
+                        platform_email: subPlatformEmail,
+                        stripe_email: customerEmail
+                      });
+                    }
+                  }
+                } catch (subError) {
+                  console.error('❌ Error checking subscription metadata for invoice:', subError);
                 }
               }
             }
           } catch (stripeError) {
-            console.error('❌ Error fetching subscription metadata:', stripeError);
+            console.error('❌ Error fetching customer metadata:', stripeError);
           }
         }
 
