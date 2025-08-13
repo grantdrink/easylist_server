@@ -57,28 +57,84 @@ export default async function handler(req, res) {
 
       console.log('📧 Customer email:', customerEmail);
 
-      // Find user by email in Supabase auth
-      const { data: { users }, error: listError } = await supabase.auth.admin.listUsers();
+      // UPDATED APPROACH: Try to find existing subscription by Stripe customer ID first
+      // This handles the case where the user already linked their subscription via the token system
+      let subscriptionRecord = null;
       
-      if (listError) {
-        console.error('❌ Error listing users:', listError);
-        return res.status(500).json({ error: 'Failed to find user' });
+      if (session.customer) {
+        const { data: existingSubscription } = await supabase
+          .from('user_subscriptions')
+          .select('*')
+          .eq('stripe_customer_id', session.customer)
+          .single();
+          
+        if (existingSubscription) {
+          console.log('✅ Found existing subscription for customer:', session.customer);
+          subscriptionRecord = existingSubscription;
+        }
       }
-
-      const user = users.find(u => u.email === customerEmail);
       
-      if (!user) {
-        console.error('❌ User not found for email:', customerEmail);
-        return res.status(400).json({ error: 'User not found' });
+      // If no existing subscription found, try to find by Stripe email
+      if (!subscriptionRecord) {
+        const { data: emailBasedSubscription } = await supabase
+          .from('user_subscriptions')
+          .select('*')
+          .eq('stripe_email', customerEmail)
+          .single();
+          
+        if (emailBasedSubscription) {
+          console.log('✅ Found existing subscription for Stripe email:', customerEmail);
+          subscriptionRecord = emailBasedSubscription;
+        }
       }
+      
+      // If still no subscription found, try the old email matching approach as fallback
+      if (!subscriptionRecord) {
+        console.log('🔍 No existing subscription found, trying email matching as fallback...');
+        
+        // Find user by email in Supabase auth
+        const { data: { users }, error: listError } = await supabase.auth.admin.listUsers();
+        
+        if (listError) {
+          console.error('❌ Error listing users:', listError);
+          return res.status(500).json({ error: 'Failed to find user' });
+        }
 
-      console.log('👤 Found user:', user.id);
+        const user = users.find(u => u.email === customerEmail);
+        
+        if (!user) {
+          console.log('⚠️ No user found for email:', customerEmail);
+          console.log('ℹ️ This is normal if the user used a different email for Stripe than for EasyList.');
+          console.log('ℹ️ The subscription will be linked when the user completes the token-based flow.');
+          return res.status(200).json({ 
+            message: 'Payment processed, but subscription linking will be handled by token-based flow',
+            stripe_customer_id: session.customer,
+            stripe_email: customerEmail
+          });
+        }
 
-              // Activate the subscription
+        console.log('👤 Found user by email fallback:', user.id);
+        
+        // Create subscription record for email-matched user
+        subscriptionRecord = {
+          user_id: user.id,
+          stripe_customer_id: session.customer,
+          stripe_subscription_id: session.subscription,
+          stripe_email: customerEmail,
+          subscription_status: 'active',
+          payment_method_attached: true,
+          current_period_start: new Date().toISOString(),
+          current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+      }
+      
+      // Update or create the subscription record
+      if (subscriptionRecord.user_id) {
         const { data, error } = await supabase
           .from('user_subscriptions')
           .upsert({
-            user_id: user.id,
+            user_id: subscriptionRecord.user_id,
             subscription_status: 'active',
             payment_method_attached: true,
             stripe_customer_id: session.customer,
@@ -93,18 +149,18 @@ export default async function handler(req, res) {
           .select()
           .single();
 
-      if (error) {
-        console.error('❌ Database error:', error);
-        // If it's still a duplicate key error after upsert, log more details
-        if (error.code === '23505') {
-          console.error('❌ Duplicate key error persisted despite upsert. This should not happen.');
-          console.error('❌ Error details:', JSON.stringify(error, null, 2));
+        if (error) {
+          console.error('❌ Database error:', error);
+          return res.status(500).json({ error: 'Failed to activate subscription' });
         }
-        return res.status(500).json({ error: 'Failed to activate subscription' });
-      }
 
-      console.log('✅ Subscription activated for user:', user.id);
-      return res.status(200).json({ success: true, user_id: user.id });
+        console.log('✅ Subscription activated for user:', subscriptionRecord.user_id);
+        return res.status(200).json({ success: true, user_id: subscriptionRecord.user_id });
+      }
+      
+      // This shouldn't happen with the new logic, but just in case
+      console.log('⚠️ Unable to link subscription - this will be handled by token-based flow');
+      return res.status(200).json({ message: 'Payment received, subscription linking pending' });
     }
 
     // Handle subscription status updates
@@ -129,7 +185,7 @@ export default async function handler(req, res) {
       console.log('✅ Subscription status updated');
     }
 
-    // Handle invoice payment (for subscriptions)
+          // Handle invoice payment (for subscriptions)
     if (event.type === 'invoice.payment_succeeded') {
       const invoice = event.data.object;
       console.log('💰 Invoice payment succeeded:', invoice.id);
@@ -149,54 +205,109 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'No customer email found' });
         }
 
-        // Find user by email in Supabase auth
-        const { data: { users }, error: listError } = await supabase.auth.admin.listUsers();
+        // UPDATED APPROACH: Try to find existing subscription by Stripe customer ID first
+        let subscriptionRecord = null;
         
-        if (listError) {
-          console.error('❌ Error listing users:', listError);
-          return res.status(500).json({ error: 'Failed to find user' });
+        if (customerId) {
+          const { data: existingSubscription } = await supabase
+            .from('user_subscriptions')
+            .select('*')
+            .eq('stripe_customer_id', customerId)
+            .single();
+            
+          if (existingSubscription) {
+            console.log('✅ Found existing subscription for customer:', customerId);
+            subscriptionRecord = existingSubscription;
+          }
         }
-
-        const user = users.find(u => u.email === customerEmail);
         
-        if (!user) {
-          console.error('❌ User not found for email:', customerEmail);
-          return res.status(400).json({ error: 'User not found' });
+        // If no existing subscription found, try to find by Stripe email
+        if (!subscriptionRecord) {
+          const { data: emailBasedSubscription } = await supabase
+            .from('user_subscriptions')
+            .select('*')
+            .eq('stripe_email', customerEmail)
+            .single();
+            
+          if (emailBasedSubscription) {
+            console.log('✅ Found existing subscription for Stripe email:', customerEmail);
+            subscriptionRecord = emailBasedSubscription;
+          }
         }
+        
+        // If still no subscription found, try the old email matching approach as fallback
+        if (!subscriptionRecord) {
+          console.log('🔍 No existing subscription found, trying email matching as fallback...');
+          
+          // Find user by email in Supabase auth
+          const { data: { users }, error: listError } = await supabase.auth.admin.listUsers();
+          
+          if (listError) {
+            console.error('❌ Error listing users:', listError);
+            return res.status(500).json({ error: 'Failed to find user' });
+          }
 
-        console.log('👤 Found user for invoice payment:', user.id);
+          const user = users.find(u => u.email === customerEmail);
+          
+          if (!user) {
+            console.log('⚠️ No user found for email:', customerEmail);
+            console.log('ℹ️ This is normal if the user used a different email for Stripe than for EasyList.');
+            console.log('ℹ️ The subscription will be linked when the user completes the token-based flow.');
+            return res.status(200).json({ 
+              message: 'Invoice payment processed, but subscription linking will be handled by token-based flow',
+              stripe_customer_id: customerId,
+              stripe_email: customerEmail
+            });
+          }
 
-        // Activate the subscription
-        const { data, error } = await supabase
-          .from('user_subscriptions')
-          .upsert({
+          console.log('👤 Found user by email fallback:', user.id);
+          
+          // Create subscription record for email-matched user
+          subscriptionRecord = {
             user_id: user.id,
-            subscription_status: 'active',
-            payment_method_attached: true,
             stripe_customer_id: customerId,
             stripe_subscription_id: invoice.subscription,
             stripe_email: customerEmail,
+            subscription_status: 'active',
+            payment_method_attached: true,
             current_period_start: new Date(invoice.period_start * 1000).toISOString(),
             current_period_end: new Date(invoice.period_end * 1000).toISOString(),
             updated_at: new Date().toISOString(),
-          }, {
-            onConflict: 'user_id'
-          })
-          .select()
-          .single();
-
-        if (error) {
-          console.error('❌ Database error for invoice:', error);
-          // If it's still a duplicate key error after upsert, log more details
-          if (error.code === '23505') {
-            console.error('❌ Duplicate key error persisted despite upsert. This should not happen.');
-            console.error('❌ Error details:', JSON.stringify(error, null, 2));
-          }
-          return res.status(500).json({ error: 'Failed to activate subscription' });
+          };
         }
+        
+        // Update or create the subscription record
+        if (subscriptionRecord.user_id) {
+          const { data, error } = await supabase
+            .from('user_subscriptions')
+            .upsert({
+              user_id: subscriptionRecord.user_id,
+              subscription_status: 'active',
+              payment_method_attached: true,
+              stripe_customer_id: customerId,
+              stripe_subscription_id: invoice.subscription,
+              stripe_email: customerEmail,
+              current_period_start: new Date(invoice.period_start * 1000).toISOString(),
+              current_period_end: new Date(invoice.period_end * 1000).toISOString(),
+              updated_at: new Date().toISOString(),
+            }, {
+              onConflict: 'user_id'
+            })
+            .select()
+            .single();
 
-        console.log('✅ Subscription activated for invoice payment:', user.id);
-        return res.status(200).json({ success: true, user_id: user.id, event_type: 'invoice.payment_succeeded' });
+          if (error) {
+            console.error('❌ Database error for invoice:', error);
+            return res.status(500).json({ error: 'Failed to activate subscription' });
+          }
+
+          console.log('✅ Subscription activated for invoice payment:', subscriptionRecord.user_id);
+          return res.status(200).json({ success: true, user_id: subscriptionRecord.user_id, event_type: 'invoice.payment_succeeded' });
+        }
+        
+        // This shouldn't happen with the new logic, but just in case
+        console.log('⚠️ Unable to link invoice payment - this will be handled by token-based flow');
+        return res.status(200).json({ message: 'Invoice payment received, subscription linking pending' });
       }
     }
 
