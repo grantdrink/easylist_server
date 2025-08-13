@@ -65,6 +65,17 @@ export default async function handler(req, res) {
     const userId = tokenData.user_id;
     console.log('👤 Found user for token:', userId);
 
+    // Get the user's platform email from auth.users
+    const { data: authUser, error: userError } = await supabase.auth.admin.getUserById(userId);
+    
+    if (userError || !authUser) {
+      console.error('❌ Error fetching user details:', userError);
+      return res.status(400).json({ error: 'User not found in auth system' });
+    }
+    
+    const userPlatformEmail = authUser.user.email;
+    console.log('📧 User platform email:', userPlatformEmail);
+
     // Search for Stripe customers with this email
     const customers = await stripe.customers.list({
       email: stripe_email,
@@ -114,6 +125,7 @@ export default async function handler(req, res) {
       .from('user_subscriptions')
       .upsert({
         user_id: userId,
+        user_email: userPlatformEmail, // Add the platform email
         stripe_customer_id: customer.id,
         stripe_subscription_id: stripeSubscriptionId,
         stripe_email: stripe_email,
@@ -140,14 +152,23 @@ export default async function handler(req, res) {
       .eq('token', token);
 
     console.log('✅ Payment processed successfully for user:', userId);
+    console.log('✅ Subscription record created/updated:', {
+      user_id: userId,
+      user_email: userPlatformEmail,
+      stripe_email: stripe_email,
+      subscription_status: subscriptionStatus,
+      stripe_customer_id: customer.id,
+    });
     
     res.status(200).json({
       success: true,
       user_id: userId,
+      user_email: userPlatformEmail,
       subscription_status: subscriptionStatus,
       stripe_customer_id: customer.id,
       stripe_email: stripe_email,
       has_active_subscription: subscriptionStatus === 'active',
+      message: `Subscription linked successfully! Platform email: ${userPlatformEmail}, Stripe email: ${stripe_email}`,
     });
 
   } catch (error) {
