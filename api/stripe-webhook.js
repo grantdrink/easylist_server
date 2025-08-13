@@ -88,45 +88,17 @@ export default async function handler(req, res) {
         }
       }
       
-      // If still no subscription found, try the old email matching approach as fallback
+      // NO FALLBACK TO EMAIL MATCHING - Let token-based flow handle all new subscriptions
       if (!subscriptionRecord) {
-        console.log('🔍 No existing subscription found, trying email matching as fallback...');
-        
-        // Find user by email in Supabase auth
-        const { data: { users }, error: listError } = await supabase.auth.admin.listUsers();
-        
-        if (listError) {
-          console.error('❌ Error listing users:', listError);
-          return res.status(500).json({ error: 'Failed to find user' });
-        }
-
-        const user = users.find(u => u.email === customerEmail);
-        
-        if (!user) {
-          console.log('⚠️ No user found for email:', customerEmail);
-          console.log('ℹ️ This is normal if the user used a different email for Stripe than for EasyList.');
-          console.log('ℹ️ The subscription will be linked when the user completes the token-based flow.');
-          return res.status(200).json({ 
-            message: 'Payment processed, but subscription linking will be handled by token-based flow',
-            stripe_customer_id: session.customer,
-            stripe_email: customerEmail
-          });
-        }
-
-        console.log('👤 Found user by email fallback:', user.id);
-        
-        // Create subscription record for email-matched user
-        subscriptionRecord = {
-          user_id: user.id,
+        console.log('🔍 No existing subscription found.');
+        console.log('ℹ️ This payment will be linked when the user completes the token-based flow.');
+        console.log('ℹ️ Webhook will NOT attempt email matching to prevent cross-user subscription activation.');
+        return res.status(200).json({ 
+          message: 'Payment received. Subscription linking will be handled by secure token-based flow.',
           stripe_customer_id: session.customer,
-          stripe_subscription_id: session.subscription,
           stripe_email: customerEmail,
-          subscription_status: 'active',
-          payment_method_attached: true,
-          current_period_start: new Date().toISOString(),
-          current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          updated_at: new Date().toISOString(),
-        };
+          note: 'No email matching attempted - prevents accidental cross-user activation'
+        });
       }
       
       // Update or create the subscription record
@@ -235,45 +207,17 @@ export default async function handler(req, res) {
           }
         }
         
-        // If still no subscription found, try the old email matching approach as fallback
+        // NO FALLBACK TO EMAIL MATCHING - Let token-based flow handle all new subscriptions
         if (!subscriptionRecord) {
-          console.log('🔍 No existing subscription found, trying email matching as fallback...');
-          
-          // Find user by email in Supabase auth
-          const { data: { users }, error: listError } = await supabase.auth.admin.listUsers();
-          
-          if (listError) {
-            console.error('❌ Error listing users:', listError);
-            return res.status(500).json({ error: 'Failed to find user' });
-          }
-
-          const user = users.find(u => u.email === customerEmail);
-          
-          if (!user) {
-            console.log('⚠️ No user found for email:', customerEmail);
-            console.log('ℹ️ This is normal if the user used a different email for Stripe than for EasyList.');
-            console.log('ℹ️ The subscription will be linked when the user completes the token-based flow.');
-            return res.status(200).json({ 
-              message: 'Invoice payment processed, but subscription linking will be handled by token-based flow',
-              stripe_customer_id: customerId,
-              stripe_email: customerEmail
-            });
-          }
-
-          console.log('👤 Found user by email fallback:', user.id);
-          
-          // Create subscription record for email-matched user
-          subscriptionRecord = {
-            user_id: user.id,
+          console.log('🔍 No existing subscription found for invoice payment.');
+          console.log('ℹ️ This invoice payment will be linked when the user completes the token-based flow.');
+          console.log('ℹ️ Webhook will NOT attempt email matching to prevent cross-user subscription activation.');
+          return res.status(200).json({ 
+            message: 'Invoice payment received. Subscription linking will be handled by secure token-based flow.',
             stripe_customer_id: customerId,
-            stripe_subscription_id: invoice.subscription,
             stripe_email: customerEmail,
-            subscription_status: 'active',
-            payment_method_attached: true,
-            current_period_start: new Date(invoice.period_start * 1000).toISOString(),
-            current_period_end: new Date(invoice.period_end * 1000).toISOString(),
-            updated_at: new Date().toISOString(),
-          };
+            note: 'No email matching attempted - prevents accidental cross-user activation'
+          });
         }
         
         // Update or create the subscription record
