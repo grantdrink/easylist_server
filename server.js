@@ -11,6 +11,7 @@ import createCustomerPortalSessionHandler from './api/create-customer-portal-ses
 import generatePaymentTokenHandler from './api/generate-payment-token.js';
 import processPaymentSuccessHandler from './api/process-payment-success.js';
 import createCheckoutSessionHandler from './api/create-checkout-session.js';
+import createStripePaymentLinkHandler from './api/create-stripe-payment-link.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -75,6 +76,7 @@ app.get('/api/health', (req, res) => {
       'POST /api/activate-subscription',
       'POST /api/create-customer-portal-session',
       'POST /api/create-checkout-session',
+      'POST /api/create-stripe-payment-link',
       'POST /api/generate-payment-token',
       'POST /api/process-payment-success',
       'GET /api/webhook-test'
@@ -110,6 +112,7 @@ if (createCheckoutSessionHandler) {
   });
 }
 
+app.post('/api/create-stripe-payment-link', createStripePaymentLinkHandler);
 app.post('/api/generate-payment-token', generatePaymentTokenHandler);
 app.post('/api/process-payment-success', processPaymentSuccessHandler);
 app.all('/api/webhook-test', webhookTestHandler);

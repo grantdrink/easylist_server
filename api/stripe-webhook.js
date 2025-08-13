@@ -60,8 +60,85 @@ export default async function handler(req, res) {
 
       console.log('📧 Customer email:', customerEmail);
       console.log('🔍 Session metadata:', JSON.stringify(session.metadata, null, 2));
+      console.log('🔍 Client reference ID:', session.client_reference_id);
 
-      // NEW AUTOMATIC APPROACH: Use payment token from session metadata
+      // FOOLPROOF APPROACH: Check client_reference_id for pre-stored payment link
+      const clientReferenceId = session.client_reference_id;
+      
+      if (clientReferenceId) {
+        console.log('🎯 FOUND CLIENT REFERENCE ID - CHECKING PENDING PAYMENTS');
+        console.log('🔍 Looking for session ID:', clientReferenceId);
+        
+        // Find the pending payment record
+        const { data: pendingPayment, error: pendingError } = await supabase
+          .from('pending_payments')
+          .select('*')
+          .eq('session_id', clientReferenceId)
+          .eq('status', 'pending')
+          .single();
+          
+        if (pendingError || !pendingPayment) {
+          console.error('❌ No pending payment found for session:', clientReferenceId, pendingError);
+        } else {
+          console.log('🎉 FOUND PENDING PAYMENT!');
+          console.log('👤 User ID:', pendingPayment.user_id);
+          console.log('📧 User Email:', pendingPayment.user_email);
+          console.log('💳 Stripe Email:', customerEmail);
+          
+          // Create/update subscription record
+          const subscriptionData = {
+            user_id: pendingPayment.user_id,
+            user_email: pendingPayment.user_email,
+            stripe_customer_id: session.customer,
+            stripe_subscription_id: session.subscription,
+            stripe_email: customerEmail,
+            subscription_status: 'active',
+            payment_method_attached: true,
+            current_period_start: new Date().toISOString(),
+            current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+
+          console.log('🔍 Creating subscription:', JSON.stringify(subscriptionData, null, 2));
+
+          const { data, error } = await supabase
+            .from('user_subscriptions')
+            .upsert(subscriptionData, {
+              onConflict: 'user_id'
+            })
+            .select()
+            .single();
+
+          if (error) {
+            console.error('❌ Failed to create subscription:', error);
+          } else {
+            // Mark pending payment as completed
+            await supabase
+              .from('pending_payments')
+              .update({ 
+                status: 'completed',
+                stripe_customer_id: session.customer,
+                stripe_email: customerEmail,
+                processed_at: new Date().toISOString()
+              })
+              .eq('session_id', clientReferenceId);
+
+            console.log('🎉 FOOLPROOF PAYMENT LINKING SUCCESSFUL!');
+            console.log('✅ User:', pendingPayment.user_id, '(' + pendingPayment.user_email + ')');
+            console.log('✅ Stripe Email:', customerEmail);
+            
+            return res.status(200).json({ 
+              success: true, 
+              user_id: pendingPayment.user_id,
+              message: 'Subscription automatically activated via foolproof linking',
+              platform_email: pendingPayment.user_email,
+              stripe_email: customerEmail
+            });
+          }
+        }
+      }
+
+      // BACKUP: Try metadata approach
       const paymentToken = session.metadata?.payment_token;
       const userId = session.metadata?.user_id;
       const platformEmail = session.metadata?.platform_email;
