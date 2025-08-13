@@ -200,6 +200,80 @@ export default async function handler(req, res) {
       }
     }
 
+    // Handle invoice payment failure - CRITICAL for cutting off non-paying users
+    if (event.type === 'invoice.payment_failed') {
+      const invoice = event.data.object;
+      console.log('💸 Invoice payment failed:', invoice.id);
+
+      // Update subscription status to unpaid (blocks access)
+      const { error } = await supabase
+        .from('user_subscriptions')
+        .update({
+          subscription_status: 'unpaid',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('stripe_subscription_id', invoice.subscription);
+
+      if (error) {
+        console.error('❌ Failed to update subscription to unpaid:', error);
+        return res.status(500).json({ error: 'Failed to update subscription' });
+      }
+
+      console.log('🚫 Subscription set to unpaid - user access blocked');
+    }
+
+    // Handle subscription cancellation - immediately cut off access
+    if (event.type === 'customer.subscription.deleted') {
+      const subscription = event.data.object;
+      console.log('🗑️ Subscription canceled:', subscription.id);
+
+      // Set status to canceled (blocks access)
+      const { error } = await supabase
+        .from('user_subscriptions')
+        .update({
+          subscription_status: 'canceled',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('stripe_subscription_id', subscription.id);
+
+      if (error) {
+        console.error('❌ Failed to update canceled subscription:', error);
+        return res.status(500).json({ error: 'Failed to update subscription' });
+      }
+
+      console.log('✅ Subscription marked as canceled - user access blocked');
+    }
+
+    // Handle trial ending - this is CRITICAL for cutting off trial users
+    if (event.type === 'customer.subscription.trial_will_end') {
+      const subscription = event.data.object;
+      console.log('⏰ Trial ending soon for subscription:', subscription.id);
+
+      // Optional: Send notification email or update status
+      // This gives you a 3-day warning before trial ends
+      console.log('📧 Consider sending trial ending notification to user');
+    }
+
+    // Handle subscription paused/incomplete - for failed trial conversions
+    if (event.type === 'customer.subscription.paused') {
+      const subscription = event.data.object;
+      console.log('⏸️ Subscription paused:', subscription.id);
+
+      const { error } = await supabase
+        .from('user_subscriptions')
+        .update({
+          subscription_status: 'canceled',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('stripe_subscription_id', subscription.id);
+
+      if (error) {
+        console.error('❌ Failed to update paused subscription:', error);
+      } else {
+        console.log('✅ Paused subscription marked as canceled - access blocked');
+      }
+    }
+
     res.status(200).json({ received: true });
 
   } catch (error) {
