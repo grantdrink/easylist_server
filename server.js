@@ -10,6 +10,7 @@ import webhookTestHandler from './api/webhook-test.js';
 import createCustomerPortalSessionHandler from './api/create-customer-portal-session.js';
 import generatePaymentTokenHandler from './api/generate-payment-token.js';
 import processPaymentSuccessHandler from './api/process-payment-success.js';
+import createCheckoutSessionHandler from './api/create-checkout-session.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -73,6 +74,7 @@ app.get('/api/health', (req, res) => {
       'POST /api/stripe-webhook', 
       'POST /api/activate-subscription',
       'POST /api/create-customer-portal-session',
+      'POST /api/create-checkout-session',
       'POST /api/generate-payment-token',
       'POST /api/process-payment-success',
       'GET /api/webhook-test'
@@ -90,6 +92,24 @@ app.get('/api/health', (req, res) => {
 app.post('/api/stripe-webhook', stripeWebhookHandler);
 app.post('/api/activate-subscription', activateSubscriptionHandler);
 app.post('/api/create-customer-portal-session', createCustomerPortalSessionHandler);
+
+console.log('🔧 Registering /api/create-checkout-session route...');
+console.log('🔧 Handler available:', !!createCheckoutSessionHandler);
+
+if (createCheckoutSessionHandler) {
+  app.post('/api/create-checkout-session', createCheckoutSessionHandler);
+  console.log('✅ Successfully registered /api/create-checkout-session');
+} else {
+  console.error('❌ createCheckoutSessionHandler is null - adding fallback');
+  app.post('/api/create-checkout-session', (req, res) => {
+    console.error('🚨 FALLBACK HANDLER CALLED - Main handler failed to import');
+    res.status(500).json({ 
+      error: 'Handler import failed',
+      message: 'create-checkout-session handler could not be imported'
+    });
+  });
+}
+
 app.post('/api/generate-payment-token', generatePaymentTokenHandler);
 app.post('/api/process-payment-success', processPaymentSuccessHandler);
 app.all('/api/webhook-test', webhookTestHandler);
