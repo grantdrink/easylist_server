@@ -159,9 +159,9 @@ export default async (req, res) => {
       try {
         console.log(`🏢 Checking business: ${business.businesses?.name}`);
 
-        // Call the check_inventory_thresholds function for this business
+        // Call the smart check_inventory_thresholds function for this business
         const { data: result, error: thresholdError } = await supabase
-          .rpc('check_inventory_thresholds', {
+          .rpc('check_inventory_thresholds_smart', {
             p_business_id: business.business_id
           });
 
@@ -286,6 +286,9 @@ async function sendPendingNotifications(businessId) {
           })
           .eq('id', notification.id);
       }
+
+      // Rate limiting: Wait between emails to avoid Resend limits (2 emails/second max)
+      await new Promise(resolve => setTimeout(resolve, 600)); // 600ms = ~1.5 emails/second
     }
 
   } catch (error) {

@@ -15,6 +15,7 @@ import createStripePaymentLinkHandler from './api/create-stripe-payment-link.js'
 import sendNotificationEmailsHandler from './api/send-notification-emails.js';
 import checkInventoryThresholdsHandler from './api/check-inventory-thresholds.js';
 import debugNotificationsHandler from './api/debug-notifications.js';
+import initializeNotificationsHandler from './api/initialize-notifications.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -124,6 +125,8 @@ app.post('/api/generate-payment-token', generatePaymentTokenHandler);
 app.post('/api/process-payment-success', processPaymentSuccessHandler);
 app.post('/api/send-notification-emails', sendNotificationEmailsHandler);
 app.post('/api/check-inventory-thresholds', checkInventoryThresholdsHandler);
+app.post('/api/initialize-notifications', initializeNotificationsHandler);
+app.get('/api/debug-notifications', debugNotificationsHandler);
 app.all('/api/webhook-test', webhookTestHandler);
 
 // Root endpoint

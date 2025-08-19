@@ -181,8 +181,8 @@ export default async (req, res) => {
         failureCount++;
       }
 
-      // Small delay between emails to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Rate limiting: Wait between emails to avoid Resend limits (2 emails/second max)
+      await new Promise(resolve => setTimeout(resolve, 600)); // 600ms = ~1.5 emails/second
     }
 
     console.log(`📊 Email processing complete - Success: ${successCount}, Failed: ${failureCount}`);
