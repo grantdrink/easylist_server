@@ -80,7 +80,7 @@ const sendEmail = async (to, subject, message, itemName, currentStock, threshold
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'EasyList <notifications@easylist.app>', // You'll need to set up your domain
+        from: 'EasyList Notifications <notifications@easylistinventory.com>',
         to: [to],
         subject: subject || `Low Stock Alert: ${itemName}`,
         html: emailHtml,

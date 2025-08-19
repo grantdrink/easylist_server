@@ -127,7 +127,7 @@ export default async (req, res) => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            from: 'EasyList <notifications@easylist.app>', // You'll need to set up your domain
+            from: 'EasyList Notifications <notifications@easylistinventory.com>',
             to: [notification.recipient],
             subject: notification.subject || `Low Stock Alert: ${notification.inventory.item_name}`,
             html: emailHtml,
