@@ -14,6 +14,7 @@ import createCheckoutSessionHandler from './api/create-checkout-session.js';
 import createStripePaymentLinkHandler from './api/create-stripe-payment-link.js';
 import sendNotificationEmailsHandler from './api/send-notification-emails.js';
 import checkInventoryThresholdsHandler from './api/check-inventory-thresholds.js';
+import debugNotificationsHandler from './api/debug-notifications.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
