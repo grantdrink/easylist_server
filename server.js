@@ -12,6 +12,8 @@ import generatePaymentTokenHandler from './api/generate-payment-token.js';
 import processPaymentSuccessHandler from './api/process-payment-success.js';
 import createCheckoutSessionHandler from './api/create-checkout-session.js';
 import createStripePaymentLinkHandler from './api/create-stripe-payment-link.js';
+import sendNotificationEmailsHandler from './api/send-notification-emails.js';
+import checkInventoryThresholdsHandler from './api/check-inventory-thresholds.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -25,6 +27,7 @@ console.log('  - VITE_STRIPE_SECRET_KEY:', !!process.env.VITE_STRIPE_SECRET_KEY)
 console.log('  - VITE_STRIPE_WEBHOOK_SECRET:', !!process.env.VITE_STRIPE_WEBHOOK_SECRET);
 console.log('  - VITE_SUPABASE_URL:', !!process.env.VITE_SUPABASE_URL);
 console.log('  - VITE_SUPABASE_SERVICE_ROLE_KEY:', !!process.env.VITE_SUPABASE_SERVICE_ROLE_KEY);
+console.log('  - VITE_RESEND_API_KEY:', !!process.env.VITE_RESEND_API_KEY);
 
 // CORS configuration - Allow your frontend domain
 app.use(cors({
@@ -79,6 +82,8 @@ app.get('/api/health', (req, res) => {
       'POST /api/create-stripe-payment-link',
       'POST /api/generate-payment-token',
       'POST /api/process-payment-success',
+      'POST /api/send-notification-emails',
+      'POST /api/check-inventory-thresholds',
       'GET /api/webhook-test'
     ],
     env_check: {
@@ -86,6 +91,7 @@ app.get('/api/health', (req, res) => {
       stripe_webhook_secret: !!process.env.VITE_STRIPE_WEBHOOK_SECRET,
       supabase_url: !!process.env.VITE_SUPABASE_URL,
       supabase_service_key: !!process.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
+      resend_api_key: !!process.env.VITE_RESEND_API_KEY,
     }
   });
 });
@@ -115,6 +121,8 @@ if (createCheckoutSessionHandler) {
 app.post('/api/create-stripe-payment-link', createStripePaymentLinkHandler);
 app.post('/api/generate-payment-token', generatePaymentTokenHandler);
 app.post('/api/process-payment-success', processPaymentSuccessHandler);
+app.post('/api/send-notification-emails', sendNotificationEmailsHandler);
+app.post('/api/check-inventory-thresholds', checkInventoryThresholdsHandler);
 app.all('/api/webhook-test', webhookTestHandler);
 
 // Root endpoint
@@ -140,6 +148,8 @@ app.use('*', (req, res) => {
       'POST /api/create-customer-portal-session',
       'POST /api/generate-payment-token',
       'POST /api/process-payment-success',
+      'POST /api/send-notification-emails',
+      'POST /api/check-inventory-thresholds',
       'GET /api/webhook-test'
     ]
   });
