@@ -89,7 +89,7 @@ export default async function handler(req, res) {
             currency: 'usd',
             product_data: {
               name: 'EasyList Pro - Monthly Subscription',
-              description: '30-day free trial, then $35/month',
+              description: '7-day free trial, then $35/month',
             },
             unit_amount: 3500, // $35.00
             recurring: {
@@ -103,7 +103,7 @@ export default async function handler(req, res) {
       success_url: `${process.env.VITE_APP_URL || 'https://easylistinventory.com'}/?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.VITE_APP_URL || 'https://easylistinventory.com'}/`,
       subscription_data: {
-        trial_period_days: 30,
+        trial_period_days: 7,
         metadata: {
           easylist_user_id: user_id,
           platform_email: userPlatformEmail,
