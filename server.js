@@ -19,6 +19,7 @@ import initializeNotificationsHandler from './api/initialize-notifications.js';
 import getInventoryHistoryHandler from './api/get-inventory-history.js';
 import logInventoryChangeHandler from './api/log-inventory-change.js';
 import debugHistorySetupHandler from './api/debug-history-setup.js';
+import testHistoryLoggingHandler from './api/test-history-logging.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -135,6 +136,7 @@ app.get('/api/debug-notifications', debugNotificationsHandler);
 app.get('/api/get-inventory-history', getInventoryHistoryHandler);
 app.post('/api/log-inventory-change', logInventoryChangeHandler);
 app.get('/api/debug-history-setup', debugHistorySetupHandler);
+app.post('/api/test-history-logging', testHistoryLoggingHandler);
 app.all('/api/webhook-test', webhookTestHandler);
 
 // Root endpoint

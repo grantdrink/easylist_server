@@ -37,6 +37,7 @@ export default async (req, res) => {
     }
 
     console.log(`Getting history for inventory_id: ${inventory_id}, business_id: ${business_id}, limit: ${limit}`);
+    console.log(`Parameter types: inventory_id=${typeof inventory_id}, business_id=${typeof business_id}`);
 
     // Get inventory history - try main function first, fallback to simple version
     let historyData, historyError;
@@ -69,6 +70,25 @@ export default async (req, res) => {
         error: 'Failed to fetch inventory history',
         details: historyError.message
       });
+    }
+
+    console.log(`Raw history data returned:`, JSON.stringify(historyData, null, 2));
+    console.log(`History record count: ${historyData?.length || 0}`);
+
+    // Debug: Check raw records in the table
+    const { data: rawRecords, error: rawError } = await supabase
+      .from('inventory_history')
+      .select('*')
+      .eq('inventory_id', parseInt(inventory_id))
+      .eq('business_id', business_id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (!rawError) {
+      console.log(`Raw records from inventory_history table:`, JSON.stringify(rawRecords, null, 2));
+      console.log(`Raw record count: ${rawRecords?.length || 0}`);
+    } else {
+      console.error('Error querying raw records:', rawError);
     }
 
     // Get inventory statistics
