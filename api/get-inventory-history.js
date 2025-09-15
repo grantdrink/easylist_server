@@ -38,13 +38,30 @@ export default async (req, res) => {
 
     console.log(`Getting history for inventory_id: ${inventory_id}, business_id: ${business_id}, limit: ${limit}`);
 
-    // Get inventory history
-    const { data: historyData, error: historyError } = await supabase
-      .rpc('get_inventory_history', {
-        p_inventory_id: parseInt(inventory_id),
-        p_business_id: business_id,
-        p_limit: parseInt(limit)
-      });
+    // Get inventory history - try main function first, fallback to simple version
+    let historyData, historyError;
+    
+    try {
+      const result = await supabase
+        .rpc('get_inventory_history', {
+          p_inventory_id: parseInt(inventory_id),
+          p_business_id: business_id,
+          p_limit: parseInt(limit)
+        });
+      historyData = result.data;
+      historyError = result.error;
+    } catch (err) {
+      console.log('Main function failed, trying simple version:', err.message);
+      // If main function fails, try the simple version
+      const result = await supabase
+        .rpc('get_inventory_history_simple', {
+          p_inventory_id: parseInt(inventory_id),
+          p_business_id: business_id,
+          p_limit: parseInt(limit)
+        });
+      historyData = result.data;
+      historyError = result.error;
+    }
 
     if (historyError) {
       console.error('Error fetching inventory history:', historyError);
