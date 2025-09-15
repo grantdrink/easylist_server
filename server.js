@@ -16,6 +16,8 @@ import sendNotificationEmailsHandler from './api/send-notification-emails.js';
 import checkInventoryThresholdsHandler from './api/check-inventory-thresholds.js';
 import debugNotificationsHandler from './api/debug-notifications.js';
 import initializeNotificationsHandler from './api/initialize-notifications.js';
+import getInventoryHistoryHandler from './api/get-inventory-history.js';
+import logInventoryChangeHandler from './api/log-inventory-change.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -86,6 +88,8 @@ app.get('/api/health', (req, res) => {
       'POST /api/process-payment-success',
       'POST /api/send-notification-emails',
       'POST /api/check-inventory-thresholds',
+      'GET /api/get-inventory-history',
+      'POST /api/log-inventory-change',
       'GET /api/webhook-test'
     ],
     env_check: {
@@ -127,6 +131,8 @@ app.post('/api/send-notification-emails', sendNotificationEmailsHandler);
 app.post('/api/check-inventory-thresholds', checkInventoryThresholdsHandler);
 app.post('/api/initialize-notifications', initializeNotificationsHandler);
 app.get('/api/debug-notifications', debugNotificationsHandler);
+app.get('/api/get-inventory-history', getInventoryHistoryHandler);
+app.post('/api/log-inventory-change', logInventoryChangeHandler);
 app.all('/api/webhook-test', webhookTestHandler);
 
 // Root endpoint
@@ -154,6 +160,8 @@ app.use('*', (req, res) => {
       'POST /api/process-payment-success',
       'POST /api/send-notification-emails',
       'POST /api/check-inventory-thresholds',
+      'GET /api/get-inventory-history',
+      'POST /api/log-inventory-change',
       'GET /api/webhook-test'
     ]
   });
