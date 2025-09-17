@@ -26,7 +26,7 @@ export default async (req, res) => {
         subject,
         message,
         created_at,
-        inventory!inner(item_name, current_stock, threshold),
+        inventory!inner(name, quantity, threshold),
         businesses!inner(name)
       `)
       .eq('notification_type', 'email')
@@ -58,7 +58,7 @@ export default async (req, res) => {
 
     for (const notification of pendingEmails) {
       try {
-        console.log(`📤 Sending email to ${notification.recipient} for item: ${notification.inventory.item_name}`);
+        console.log(`📤 Sending email to ${notification.recipient} for item: ${notification.inventory.name}`);
 
         // Enhanced email content
         const emailHtml = `
@@ -90,13 +90,13 @@ export default async (req, res) => {
               
               <div class="content">
                 <div class="alert-box">
-                  <h2 style="color: #dc2626; margin-top: 0;">${notification.inventory.item_name}</h2>
+                  <h2 style="color: #dc2626; margin-top: 0;">${notification.inventory.name}</h2>
                   <p><strong>Your inventory is running low and needs attention!</strong></p>
                 </div>
                 
                 <div class="stats">
                   <div class="stat">
-                    <div class="stat-value">${notification.inventory.current_stock}</div>
+                    <div class="stat-value">${notification.inventory.quantity}</div>
                     <div class="stat-label">Current Stock</div>
                   </div>
                   <div class="stat">
@@ -105,9 +105,9 @@ export default async (req, res) => {
                   </div>
                 </div>
                 
-                <p><strong>Action Required:</strong> Consider restocking <em>${notification.inventory.item_name}</em> to avoid running out.</p>
+                <p><strong>Action Required:</strong> Consider restocking <em>${notification.inventory.name}</em> to avoid running out.</p>
                 
-                <p>This alert was sent because your current stock (${notification.inventory.current_stock}) has reached or fallen below your threshold (${notification.inventory.threshold}).</p>
+                <p>This alert was sent because your current stock (${notification.inventory.quantity}) has reached or fallen below your threshold (${notification.inventory.threshold}).</p>
               </div>
               
               <div class="footer">
@@ -129,7 +129,7 @@ export default async (req, res) => {
           body: JSON.stringify({
             from: 'EasyList Notifications <notifications@easylistinventory.com>',
             to: [notification.recipient],
-            subject: notification.subject || `Low Stock Alert: ${notification.inventory.item_name}`,
+            subject: notification.subject || `Low Stock Alert: ${notification.inventory.name}`,
             html: emailHtml,
             text: notification.message // Fallback plain text
           }),

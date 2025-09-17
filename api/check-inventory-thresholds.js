@@ -225,7 +225,7 @@ async function sendPendingNotifications(businessId) {
           // Get item details for enhanced email
           const { data: itemData } = await supabase
             .from('inventory')
-            .select('item_name, current_stock, threshold')
+            .select('name, quantity, threshold')
             .eq('id', notification.inventory_id)
             .single();
 
@@ -239,8 +239,8 @@ async function sendPendingNotifications(businessId) {
             notification.recipient,
             notification.subject,
             notification.message,
-            itemData?.item_name || 'Unknown Item',
-            itemData?.current_stock || 0,
+            itemData?.name || 'Unknown Item',
+            itemData?.quantity || 0,
             itemData?.threshold || 0,
             businessData?.name || 'Unknown Business'
           );

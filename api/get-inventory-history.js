@@ -52,10 +52,10 @@ export default async (req, res) => {
       historyData = result.data;
       historyError = result.error;
     } catch (err) {
-      console.log('Main function failed, trying simple version:', err.message);
-      // If main function fails, try the simple version
+      console.log('Main function failed, trying debug version:', err.message);
+      // If main function fails, try the debug version
       const result = await supabase
-        .rpc('get_inventory_history_simple', {
+        .rpc('get_inventory_history_debug', {
           p_inventory_id: parseInt(inventory_id),
           p_business_id: business_id,
           p_limit: parseInt(limit)
@@ -91,13 +91,31 @@ export default async (req, res) => {
       console.error('Error querying raw records:', rawError);
     }
 
-    // Get inventory statistics
-    const { data: statsData, error: statsError } = await supabase
-      .rpc('get_inventory_stats', {
-        p_inventory_id: parseInt(inventory_id),
-        p_business_id: business_id,
-        p_days: parseInt(days)
-      });
+    // Get inventory statistics - try debug version first for better insight
+    let statsData, statsError;
+    
+    try {
+      const result = await supabase
+        .rpc('get_inventory_stats_debug', {
+          p_inventory_id: parseInt(inventory_id),
+          p_business_id: business_id,
+          p_days: parseInt(days)
+        });
+      statsData = result.data;
+      statsError = result.error;
+      console.log('📊 Stats debug data:', JSON.stringify(statsData, null, 2));
+    } catch (err) {
+      console.log('Debug stats failed, trying regular stats:', err.message);
+      // If debug fails, try regular stats
+      const result = await supabase
+        .rpc('get_inventory_stats', {
+          p_inventory_id: parseInt(inventory_id),
+          p_business_id: business_id,
+          p_days: parseInt(days)
+        });
+      statsData = result.data;
+      statsError = result.error;
+    }
 
     if (statsError) {
       console.error('Error fetching inventory stats:', statsError);
@@ -120,6 +138,8 @@ export default async (req, res) => {
       });
     }
 
+    console.log(`📊 Final statsData before response:`, JSON.stringify(statsData, null, 2));
+    
     const response = {
       success: true,
       item: itemData,
